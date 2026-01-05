@@ -2,36 +2,54 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-  <title>Zoff DNA - 検証モード</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <title>Zoff DNA - Multi-Device Ver</title>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3"></script>
   <style>
-    body { margin: 0; background: #000; color: #fff; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; overflow: hidden; }
-    #container { position: relative; width: 100vw; height: 100vh; }
-    video, canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+    :root {
+      --safe-top: env(safe-area-inset-top);
+      --safe-bottom: env(safe-area-inset-bottom);
+    }
+    body { 
+      margin: 0; background: #000; color: #fff; 
+      font-family: -apple-system, sans-serif; 
+      height: 100vh; display: flex; flex-direction: column;
+    }
+    #container { 
+      position: relative; flex: 1; overflow: hidden; 
+    }
+    video, canvas { 
+      position: absolute; top: 0; left: 0; width: 100%; height: 100%; 
+      object-fit: cover; transform: scaleX(-1); 
+    }
     
     /* ガイド枠 */
     #face-guide {
       position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-      width: 280px; height: 380px; border: 3px dashed rgba(255, 255, 255, 0.5);
-      border-radius: 140px / 190px; z-index: 10; pointer-events: none;
+      width: 70vw; height: 90vw; border: 3px dashed rgba(255, 255, 255, 0.5);
+      border-radius: 50%; z-index: 10;
     }
-    #face-guide.ok { border-color: #0070BB; background: rgba(0, 112, 187, 0.1); border-style: solid; }
-    #face-guide.ng { border-color: #E60012; background: rgba(230, 0, 18, 0.1); border-style: solid; }
 
-    /* 数値表示用オーバーレイ */
+    /* デバッグパネルを少し小さく、透過度を調整 */
     #debug-panel {
-      position: absolute; top: 20px; left: 10px; right: 10px;
-      background: rgba(0, 0, 0, 0.7); padding: 15px; border-radius: 10px;
-      font-size: 14px; z-index: 20; border: 1px solid #444;
+      position: absolute; top: calc(10px + var(--safe-top)); left: 10px; right: 10px;
+      background: rgba(0, 0, 0, 0.6); padding: 12px; border-radius: 10px;
+      font-size: 13px; z-index: 20;
     }
-    .value-row { display: flex; justify-content: space-between; margin-bottom: 5px; }
-    .val { color: #0070BB; font-weight: bold; font-size: 18px; }
-    .val.highlight { color: #ff3b30; font-size: 22px; }
 
-    #ui-bottom { position: absolute; bottom: 30px; width: 100%; text-align: center; z-index: 20; }
-    .btn { background: #0070BB; color: #fff; border: none; padding: 15px 50px; border-radius: 30px; font-size: 18px; font-weight: bold; }
-    .btn:disabled { background: #555; }
+    /* ボタンエリアを最下部に固定 */
+    #ui-bottom { 
+      padding-bottom: calc(20px + var(--safe-bottom)); 
+      padding-top: 10px;
+      background: rgba(0,0,0,0.8);
+      text-align: center; z-index: 30; 
+    }
+    .btn { 
+      background: #0070BB; color: #fff; border: none; 
+      padding: 15px 60px; border-radius: 30px; 
+      font-size: 18px; font-weight: bold;
+      -webkit-appearance: none; /* iOSでのボタン表示崩れ防止 */
+    }
   </style>
 </head>
 <body>
@@ -39,115 +57,19 @@
     <video id="webcam" autoplay playsinline muted></video>
     <canvas id="output_canvas"></canvas>
     <div id="face-guide"></div>
-
     <div id="debug-panel">
-      <div style="text-align:center; font-weight:bold; color:#aaa; margin-bottom:10px; font-size:12px;">【検証用リアルタイム計測値】</div>
-      <div class="value-row"><span>瞳孔間距離(PD)基準:</span><span class="val">66.0 mm</span></div>
-      <div class="value-row"><span>目頭間距離(IE):</span><span id="val_ie" class="val highlight">- mm</span></div>
-      <div class="value-row"><span>顔幅(FW):</span><span id="val_fw" class="val">- mm</span></div>
-      <div class="value-row"><span>鼻幅(NW):</span><span id="val_nw" class="val">- mm</span></div>
-      <hr style="border:0; border-top:1px solid #444; margin:10px 0;">
-      <div class="value-row"><span>姿勢/距離ステータス:</span><span id="status_text" style="font-weight:bold;">判定中...</span></div>
-    </div>
-
-    <div id="ui-bottom">
-      <button id="start_btn" class="btn">平均計測開始 (2秒)</button>
+      <div id="val_ie" style="font-size:20px; color:#0070BB; text-align:center; font-weight:bold;">読み込み中...</div>
+      <div id="status_text" style="text-align:center; font-size:12px; margin-top:5px;">カメラを許可してください</div>
     </div>
   </div>
 
+  <div id="ui-bottom">
+    <button id="start_btn" class="btn">計測開始</button>
+  </div>
+
   <script type="module">
-    import { FaceLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3";
-
-    const video = document.getElementById("webcam");
-    const canvasElement = document.getElementById("output_canvas");
-    const canvasCtx = canvasElement.getContext("2d");
-    const faceGuide = document.getElementById("face-guide");
-    const startBtn = document.getElementById("start_btn");
-    
-    let faceLandmarker;
-    let isDataCollecting = false;
-    let measurementData = [];
-    const MY_PD_MM = 66.0; 
-
-    async function setup() {
-      const filesetResolver = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm");
-      faceLandmarker = await FaceLandmarker.createFromOptions(filesetResolver, {
-        baseOptions: { 
-          modelAssetPath: `https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task`,
-          delegate: "GPU" 
-        },
-        runningMode: "VIDEO", numFaces: 1, refineLandmarks: true
-      });
-      startCamera();
-    }
-
-    function startCamera() {
-      navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: 1280, height: 720 } }).then((stream) => {
-        video.srcObject = stream;
-        video.onloadeddata = predict;
-      });
-    }
-
-    const calcDist = (p1, p2, w, h) => Math.sqrt(Math.pow((p1.x - p2.x)*w, 2) + Math.pow((p1.y - p2.y)*h, 2));
-
-    async function predict() {
-      canvasElement.width = video.videoWidth;
-      canvasElement.height = video.videoHeight;
-      const results = faceLandmarker.detectForVideo(video, performance.now());
-      
-      canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-      if (results.faceLandmarks && results.faceLandmarks.length > 0) {
-        const pts = results.faceLandmarks[0];
-        const w = canvasElement.width;
-        const h = canvasElement.height;
-
-        // ガードレール判定
-        const zDiff = Math.abs(pts[468].z - pts[473].z); 
-        const isFrontal = zDiff < 0.018;
-        const faceRatio = (calcDist(pts[234], pts[454], w, h) / w);
-        const isDistOk = faceRatio > 0.3 && faceRatio < 0.6; // iPhone向けに少し緩和
-
-        const statusEl = document.getElementById("status_text");
-        if (!isFrontal) { statusEl.innerText = "正面を向いて"; statusEl.style.color = "#ff3b30"; faceGuide.className = "ng"; }
-        else if (!isDistOk) { statusEl.innerText = "距離を調整"; statusEl.style.color = "#ff3b30"; faceGuide.className = "ng"; }
-        else { statusEl.innerText = "OK: 計測可能"; statusEl.style.color = "#4cd964"; faceGuide.className = "ok"; }
-
-        // リアルタイム計算
-        const pdPx = calcDist(pts[473], pts[468], w, h);
-        const mmPerPx = MY_PD_MM / pdPx;
-
-        const ieMm = calcDist(pts[133], pts[362], w, h) * mmPerPx;
-        const fwMm = calcDist(pts[234], pts[454], w, h) * mmPerPx;
-        const nwMm = calcDist(pts[64], pts[294], w, h) * mmPerPx;
-
-        document.getElementById("val_ie").innerText = ieMm.toFixed(1) + " mm";
-        document.getElementById("val_fw").innerText = fwMm.toFixed(1) + " mm";
-        document.getElementById("val_nw").innerText = nwMm.toFixed(1) + " mm";
-
-        if (isDataCollecting && isFrontal && isDistOk) {
-          measurementData.push({ ie: ieMm, fw: fwMm, nw: nwMm });
-          startBtn.innerText = `解析中...(${Math.round(measurementData.length/60*100)}%)`;
-          if (measurementData.length >= 60) finish();
-        }
-      }
-      requestAnimationFrame(predict);
-    }
-
-    startBtn.onclick = () => {
-      measurementData = [];
-      isDataCollecting = true;
-      startBtn.disabled = true;
-    };
-
-    function finish() {
-      isDataCollecting = false;
-      startBtn.disabled = false;
-      startBtn.innerText = "再計測";
-      const avg = (key) => (measurementData.reduce((a, b) => a + b[key], 0) / measurementData.length).toFixed(1);
-      alert(`【計測完了】\n目頭間: ${avg('ie')}mm\n顔幅: ${avg('fw')}mm\n鼻幅: ${avg('nw')}mm`);
-    }
-
-    setup();
+    // ... (MediaPipeのロジックは前回と同じものを流用) ...
+    // ... (GitHubにアップする際は前回の script 内容をここに貼り付けてください) ...
   </script>
 </body>
 </html>
