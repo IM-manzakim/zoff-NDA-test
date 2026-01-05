@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-  <title>Zoff DNA - 現場最適化UI</title>
+  <title>Zoff DNA - Measurement Assist</title>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3"></script>
   <style>
     html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; position: fixed; }
@@ -11,51 +11,71 @@
     #container { position: relative; flex: 1; width: 100%; overflow: hidden; }
     video, canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
     
-    /* ガイド枠：iPhone 11でも収まりが良いサイズに調整 */
-    #face-guide {
+    /* フェイスガイド（マスク型） */
+    #face-mask {
       position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-      width: 65vw; height: 85vw; 
-      border: 3px dashed rgba(255, 255, 255, 0.4);
-      border-radius: 50%; z-index: 10; pointer-events: none;
+      width: 260px; height: 360px; z-index: 10; pointer-events: none;
+      opacity: 0.6; transition: all 0.2s;
     }
-    #face-guide.ok { border-color: #0070BB; border-style: solid; box-shadow: 0 0 15px rgba(0, 112, 187, 0.5); }
-    #face-guide.ng { border-color: #ff3b30; }
+    .mask-line { fill: none; stroke: white; stroke-width: 2; stroke-dasharray: 5; }
+    #face-mask.ok .mask-line { stroke: #0070BB; stroke-dasharray: 0; stroke-width: 3; }
+    #face-mask.ok { opacity: 1; filter: drop-shadow(0 0 8px rgba(0, 112, 187, 0.8)); }
 
-    /* 傾きインジケーター */
-    #level-dot {
-      position: absolute; top: 50%; left: 50%; width: 14px; height: 14px;
-      background: #4cd964; border-radius: 50%; transform: translate(-50%, -50%);
-      z-index: 15; border: 2px solid #fff; display: none;
+    /* 姿勢制御センタードット */
+    #level-cross {
+      position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      width: 40px; height: 40px; z-index: 11; pointer-events: none;
     }
+    #level-dot {
+      position: absolute; width: 12px; height: 12px; background: #ff3b30;
+      border-radius: 50%; z-index: 12; transition: background 0.2s;
+    }
+    #level-dot.ok { background: #4cd964; box-shadow: 0 0 10px #4cd964; }
 
     #debug-panel {
       position: absolute; top: calc(10px + env(safe-area-inset-top)); 
       left: 10px; right: 10px;
-      background: rgba(0, 0, 0, 0.7); padding: 12px; border-radius: 10px;
-      z-index: 20; border: 1px solid #444;
+      background: rgba(0, 0, 0, 0.7); padding: 15px; border-radius: 12px;
+      font-size: 13px; z-index: 20; border: 1px solid rgba(255,255,255,0.2);
     }
-    #status_text { text-align: center; font-weight: bold; font-size: 15px; }
+    #status_text { text-align: center; font-weight: bold; font-size: 16px; margin-bottom: 5px; }
+    .val-display { display: flex; justify-content: space-around; font-size: 11px; color: #aaa; }
 
     #ui-bottom { 
-      background: #111; padding-top: 15px;
-      padding-bottom: calc(20px + env(safe-area-inset-bottom));
+      background: #111; padding: 20px 0 calc(20px + env(safe-area-inset-bottom));
       text-align: center; z-index: 30; border-top: 1px solid #333;
     }
-    .btn { background: #0070BB; color: #fff; border: none; padding: 16px 60px; border-radius: 30px; font-size: 18px; font-weight: bold; -webkit-appearance: none; }
-    .btn:disabled { background: #444; color: #888; }
+    .btn { 
+      background: #333; color: #888; border: none; padding: 16px 60px; 
+      border-radius: 35px; font-size: 18px; font-weight: bold; 
+      transition: all 0.3s;
+    }
+    .btn.active { background: #0070BB; color: #fff; box-shadow: 0 4px 15px rgba(0,112,187,0.4); }
   </style>
 </head>
 <body>
   <div id="container">
     <video id="webcam" autoplay playsinline muted></video>
     <canvas id="output_canvas"></canvas>
-    <div id="face-guide"></div>
+    
+    <svg id="face-mask" viewBox="0 0 200 280">
+      <ellipse class="mask-line" cx="100" cy="140" rx="90" ry="130" />
+      <path class="mask-line" d="M60,110 Q100,100 140,110 M70,180 Q100,200 130,180" /> <line class="mask-line" x1="100" y1="120" x2="100" y2="160" /> </svg>
+
     <div id="level-dot"></div>
+
     <div id="debug-panel">
-      <div id="status_text">カメラ準備中...</div>
+      <div id="status_text">カメラを顔に合わせてください</div>
+      <div class="val-display">
+        <span>IE: <span id="val_ie">-</span>mm</span>
+        <span>FW: <span id="val_fw">-</span>mm</span>
+      </div>
     </div>
   </div>
-  <div id="ui-bottom"><button id="start_btn" class="btn" disabled>枠に顔を合わせてください</button></div>
+
+  <div id="ui-bottom">
+    <button id="start_btn" class="btn" disabled>枠に合わせてください</button>
+  </div>
 
   <script type="module">
     import { FaceLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3";
@@ -63,7 +83,7 @@
     const video = document.getElementById("webcam");
     const canvasElement = document.getElementById("output_canvas");
     const canvasCtx = canvasElement.getContext("2d");
-    const faceGuide = document.getElementById("face-guide");
+    const faceMask = document.getElementById("face-mask");
     const levelDot = document.getElementById("level-dot");
     const startBtn = document.getElementById("start_btn");
     const statusText = document.getElementById("status_text");
@@ -106,47 +126,55 @@
           const w = canvasElement.width;
           const h = canvasElement.height;
 
-          // 水準器：中心からのズレを可視化
-          const xRot = (pts[468].z - pts[473].z) * 800; 
-          const yOffset = (pts[4].y - 0.5) * 200; 
-          levelDot.style.display = "block";
+          // 1. 姿勢判定（水準器ロジック）
+          const xRot = (pts[468].z - pts[473].z) * 1000; // 左右の傾き
+          const yRot = (pts[4].y - (pts[133].y + pts[362].y)/2) * 400; // 上下の傾き
+
           levelDot.style.left = `calc(50% + ${xRot}px)`;
-          levelDot.style.top = `calc(50% + ${yOffset}px)`;
+          levelDot.style.top = `calc(50% + ${yRot}px)`;
 
-          // 判定（現場向けに少し緩和）
           const zDiff = Math.abs(pts[468].z - pts[473].z); 
-          const isFrontal = zDiff < 0.020; // 0.012から緩和
-          const faceRatio = (calcDist(pts[234], pts[454], w, h) / w);
+          const isFrontal = zDiff < 0.015; // 現場用に少しだけ緩和
           
-          // 枠の見た目と一致する距離判定（0.25〜0.45）
-          const isDistOk = faceRatio >= 0.25 && faceRatio <= 0.45;
+          // 2. 距離判定（比率 0.28〜0.40）
+          const faceRatio = (calcDist(pts[234], pts[454], w, h) / w);
+          const isDistOk = faceRatio >= 0.28 && faceRatio <= 0.42;
 
-          if (!isFrontal) {
-            statusText.innerText = "正面を向いてください";
-            statusText.style.color = "#ff3b30";
-            faceGuide.className = "ng";
-            startBtn.disabled = true;
-            startBtn.innerText = "正面を向いてください";
-          } else if (!isDistOk) {
-            statusText.innerText = "枠に顔の大きさを合わせてください";
-            statusText.style.color = "#ff3b30";
-            faceGuide.className = "ng";
-            startBtn.disabled = true;
-            startBtn.innerText = "距離を調整してください";
-          } else {
-            statusText.innerText = "OK！そのままキープ";
+          // UIフィードバック
+          if (isFrontal && isDistOk) {
+            faceMask.classList.add("ok");
+            levelDot.classList.add("ok");
+            statusText.innerText = "完璧です！そのままキープ";
             statusText.style.color = "#4cd964";
-            faceGuide.className = "ok";
             startBtn.disabled = false;
+            startBtn.classList.add("active");
             startBtn.innerText = "計測開始";
+          } else {
+            faceMask.classList.remove("ok");
+            levelDot.classList.remove("ok");
+            startBtn.disabled = true;
+            startBtn.classList.remove("active");
+            startBtn.innerText = "枠に合わせる";
+            
+            if (!isFrontal) {
+                statusText.innerText = "赤い点を中心に置いて";
+                statusText.style.color = "#ff3b30";
+            } else {
+                statusText.innerText = faceRatio < 0.28 ? "少し近づいて" : "少し離れて";
+                statusText.style.color = "#ffcc00";
+            }
           }
 
+          const pdPx = calcDist(pts[473], pts[468], w, h);
+          const mmPerPx = MY_PD_MM / pdPx;
+          document.getElementById("val_ie").innerText = (calcDist(pts[133], pts[362], w, h) * mmPerPx).toFixed(1);
+          document.getElementById("val_fw").innerText = (calcDist(pts[234], pts[454], w, h) * mmPerPx).toFixed(1);
+
           if (isDataCollecting && isFrontal && isDistOk) {
-            const mmPerPx = MY_PD_MM / calcDist(pts[473], pts[468], w, h);
             measurementData.push({ 
-              ie: calcDist(pts[133], pts[362], w, h) * mmPerPx, 
-              fw: calcDist(pts[234], pts[454], w, h) * mmPerPx, 
-              score: zDiff 
+                ie: calcDist(pts[133], pts[362], w, h) * mmPerPx, 
+                fw: calcDist(pts[234], pts[454], w, h) * mmPerPx, 
+                score: zDiff 
             });
             startBtn.innerText = `解析中...(${Math.round(measurementData.length/60*100)}%)`;
             if (measurementData.length >= 60) finish();
