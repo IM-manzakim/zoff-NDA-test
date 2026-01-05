@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-  <title>Zoff DNA - 3D Metric Mode</title>
+  <title>Zoff DNA - 3D Stability Mode</title>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3"></script>
   <style>
     html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; position: fixed; }
@@ -11,41 +11,22 @@
     #container { position: relative; flex: 1; width: 100%; overflow: hidden; }
     video, canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
     
-    /* 二重枠ガイド（UIは好評だったので維持） */
-    .guide-circle {
-      position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-      border-radius: 50%; pointer-events: none; z-index: 10; border: 2px dashed rgba(255, 255, 255, 0.2);
-    }
+    .guide-circle { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); border-radius: 50%; pointer-events: none; z-index: 10; border: 2px dashed rgba(255, 255, 255, 0.2); }
     #guide-outer { width: 280px; height: 380px; border-color: rgba(255, 255, 255, 0.4); }
     #guide-inner { width: 200px; height: 280px; border-color: rgba(255, 255, 255, 0.2); }
 
-    #face-mask-area {
-      position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-      width: 250px; height: 340px; border-radius: 50%; z-index: 9; pointer-events: none;
-      transition: all 0.3s;
-    }
+    #face-mask-area { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 250px; height: 340px; border-radius: 50%; z-index: 9; pointer-events: none; transition: all 0.3s; }
     #face-mask-area.ok { background: rgba(0, 112, 187, 0.15); border: 4px solid #0070BB; box-shadow: 0 0 20px #0070BB; }
 
-    #level-dot {
-      position: absolute; width: 14px; height: 14px; background: #ff3b30;
-      border-radius: 50%; z-index: 12; border: 2px solid #fff;
-    }
+    #level-dot { position: absolute; width: 14px; height: 14px; background: #ff3b30; border-radius: 50%; z-index: 12; border: 2px solid #fff; left: 50%; top: 50%; }
     #level-dot.ok { background: #4cd964; box-shadow: 0 0 10px #4cd964; }
 
-    #debug-panel {
-      position: absolute; top: calc(10px + env(safe-area-inset-top)); 
-      left: 10px; right: 10px;
-      background: rgba(0, 0, 0, 0.7); padding: 15px; border-radius: 12px;
-      z-index: 20; border: 1px solid rgba(255,255,255,0.2);
-    }
+    #debug-panel { position: absolute; top: calc(10px + env(safe-area-inset-top)); left: 10px; right: 10px; background: rgba(0, 0, 0, 0.7); padding: 15px; border-radius: 12px; z-index: 20; border: 1px solid rgba(255,255,255,0.2); }
     #status_text { text-align: center; font-weight: bold; font-size: 16px; }
 
-    #ui-bottom { 
-      background: #111; padding: 20px 0 calc(20px + env(safe-area-inset-bottom));
-      text-align: center; z-index: 30; border-top: 1px solid #333;
-    }
-    .btn { background: #333; color: #888; border: none; padding: 16px 60px; border-radius: 35px; font-size: 18px; font-weight: bold; }
-    .btn.active { background: #0070BB; color: #fff; }
+    #ui-bottom { background: #111; padding: 20px 0 calc(20px + env(safe-area-inset-bottom)); text-align: center; z-index: 30; border-top: 1px solid #333; }
+    .btn { background: #333; color: #888; border: none; padding: 16px 60px; border-radius: 35px; font-size: 18px; font-weight: bold; transition: background 0.2s; }
+    .btn.active { background: #0070BB !important; color: #fff !important; }
   </style>
 </head>
 <body>
@@ -57,11 +38,11 @@
     <div id="face-mask-area"></div>
     <div id="level-dot"></div>
     <div id="debug-panel">
-      <div id="status_text">3Dスキャン準備中...</div>
+      <div id="status_text">スキャン準備中...</div>
     </div>
   </div>
   <div id="ui-bottom">
-    <button id="start_btn" class="btn" disabled>距離を調整中...</button>
+    <button id="start_btn" class="btn" disabled>距離を調整中</button>
   </div>
 
   <script type="module">
@@ -87,7 +68,7 @@
           modelAssetPath: `https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task`,
           delegate: "GPU" 
         },
-        runningMode: "VIDEO", numFaces: 1, refineLandmarks: true // refineLandmarksが3D精度に重要
+        runningMode: "VIDEO", numFaces: 1, refineLandmarks: true
       });
       startCamera();
     }
@@ -99,13 +80,8 @@
       });
     }
 
-    // 3D空間上の2点間の距離を計算する関数 (Metric calculation)
     const calcDist3D = (p1, p2) => {
-        return Math.sqrt(
-            Math.pow(p1.x - p2.x, 2) + 
-            Math.pow(p1.y - p2.y, 2) + 
-            Math.pow(p1.z - p2.z, 2)
-        );
+        return Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2) + Math.pow(p1.z - p2.z, 2));
     };
 
     async function predict() {
@@ -120,65 +96,73 @@
           const w = canvasElement.width;
           const h = canvasElement.height;
 
-          // 姿勢制御UIの更新
+          // 姿勢制御（水準器）
           const xRot = (pts[468].z - pts[473].z) * 1000;
           const yRot = (pts[4].y - (pts[133].y + pts[362].y)/2) * 400;
           levelDot.style.left = `calc(50% + ${xRot}px)`;
           levelDot.style.top = `calc(50% + ${yRot}px)`;
 
           const zDiff = Math.abs(pts[468].z - pts[473].z); 
-          const isFrontal = zDiff < 0.015;
+          const isFrontal = zDiff < 0.018; // 少し緩和して押しやすく
           
-          // 2Dの見た目比率（UIのガイド用）
           const faceRatio = (Math.sqrt(Math.pow((pts[234].x - pts[454].x)*w, 2) + Math.pow((pts[234].y - pts[454].y)*h, 2)) / w);
-          const isDistOk = faceRatio >= 0.26 && faceRatio <= 0.44;
+          const isDistOk = faceRatio >= 0.25 && faceRatio <= 0.45;
 
           if (isFrontal && isDistOk) {
             faceMaskArea.classList.add("ok");
             levelDot.classList.add("ok");
-            statusText.innerText = "3Dスキャン可能";
+            statusText.innerText = "OK！そのまま計測";
             statusText.style.color = "#4cd964";
-            startBtn.disabled = false;
-            startBtn.classList.add("active");
-            startBtn.innerText = "3D計測開始";
+            if (!isDataCollecting) {
+              startBtn.disabled = false;
+              startBtn.classList.add("active");
+              startBtn.innerText = "3D計測開始";
+            }
           } else {
             faceMaskArea.classList.remove("ok");
             levelDot.classList.remove("ok");
-            startBtn.disabled = true;
-            startBtn.classList.remove("active");
-            startBtn.innerText = "位置を調整中...";
-            statusText.innerText = !isFrontal ? "正面を向いてください" : "枠に顔を合わせてください";
-            statusText.style.color = "#ffcc00";
+            if (!isDataCollecting) {
+              startBtn.disabled = true;
+              startBtn.classList.remove("active");
+              startBtn.innerText = "位置を調整してください";
+              statusText.innerText = !isFrontal ? "正面を向いてください" : "枠に顔を合わせてください";
+              statusText.style.color = "#ffcc00";
+            }
           }
 
-          if (isDataCollecting && isFrontal && isDistOk) {
-            // 【重要】3D座標空間での距離計算
-            // MediaPipeのx,y,z座標(0.0〜1.0)を使って、PD比で実寸化する
-            const pd3D = calcDist3D(pts[468], pts[473]);
-            const mmPerUnit3D = MY_PD_MM / pd3D;
-
-            const ieMm = calcDist3D(pts[133], pts[362]) * mmPerPx; // 本来は3D空間上の点
-            // 今回はより安定させるため、3D座標の差分から実寸を算出
-            const ieDist3D = calcDist3D(pts[133], pts[362]) * mmPerUnit3D;
-            const fwDist3D = calcDist3D(pts[234], pts[454]) * mmPerUnit3D;
-
-            measurementData.push({ 
-                ie: ieDist3D, 
-                fw: fwDist3D, 
-                score: zDiff 
-            });
-            startBtn.innerText = `解析中...(${Math.round(measurementData.length/60*100)}%)`;
-            if (measurementData.length >= 60) finish();
+          if (isDataCollecting) {
+            if (isFrontal && isDistOk) {
+                const pd3D = calcDist3D(pts[468], pts[473]);
+                const mmPerUnit3D = MY_PD_MM / pd3D;
+                measurementData.push({ 
+                    ie: calcDist3D(pts[133], pts[362]) * mmPerUnit3D, 
+                    fw: calcDist3D(pts[234], pts[454]) * mmPerUnit3D, 
+                    score: zDiff 
+                });
+                startBtn.innerText = `解析中...(${Math.round(measurementData.length/60*100)}%)`;
+                if (measurementData.length >= 60) finish();
+            } else {
+                statusText.innerText = "静止してください！";
+                statusText.style.color = "#ff3b30";
+            }
           }
         }
       }
       requestAnimationFrame(predict);
     }
 
-    startBtn.onclick = () => { measurementData = []; isDataCollecting = true; startBtn.disabled = true; };
+    startBtn.onclick = () => {
+      measurementData = [];
+      isDataCollecting = true;
+      startBtn.disabled = true;
+      startBtn.classList.remove("active");
+    };
 
     function finish() {
-      isDataCollecting = false; startBtn.innerText = "再計測";
+      isDataCollecting = false;
+      startBtn.disabled = false;
+      startBtn.classList.add("active");
+      startBtn.innerText = "再計測";
       measurementData.sort((a, b) => a.score - b.score);
       const bestSamples = measurementData.slice(0, 20);
       const avg = (key) => (bestSamples.reduce((a, b) => a + b[key], 0) / bestSamples.length).toFixed(1);
