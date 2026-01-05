@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-  <title>Zoff DNA - Precision UI</title>
+  <title>Zoff DNA - 3D Metric Mode</title>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3"></script>
   <style>
     html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; position: fixed; }
@@ -11,17 +11,14 @@
     #container { position: relative; flex: 1; width: 100%; overflow: hidden; }
     video, canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
     
-    /* 二重枠ガイド（ドーナツ型） */
+    /* 二重枠ガイド（UIは好評だったので維持） */
     .guide-circle {
       position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
       border-radius: 50%; pointer-events: none; z-index: 10; border: 2px dashed rgba(255, 255, 255, 0.2);
     }
-    /* 外枠：これより近づくとNG */
     #guide-outer { width: 280px; height: 380px; border-color: rgba(255, 255, 255, 0.4); }
-    /* 内枠：これより遠ざかるとNG */
     #guide-inner { width: 200px; height: 280px; border-color: rgba(255, 255, 255, 0.2); }
 
-    /* OK時の発光エフェクト */
     #face-mask-area {
       position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
       width: 250px; height: 340px; border-radius: 50%; z-index: 9; pointer-events: none;
@@ -47,10 +44,7 @@
       background: #111; padding: 20px 0 calc(20px + env(safe-area-inset-bottom));
       text-align: center; z-index: 30; border-top: 1px solid #333;
     }
-    .btn { 
-      background: #333; color: #888; border: none; padding: 16px 60px; 
-      border-radius: 35px; font-size: 18px; font-weight: bold; 
-    }
+    .btn { background: #333; color: #888; border: none; padding: 16px 60px; border-radius: 35px; font-size: 18px; font-weight: bold; }
     .btn.active { background: #0070BB; color: #fff; }
   </style>
 </head>
@@ -58,18 +52,14 @@
   <div id="container">
     <video id="webcam" autoplay playsinline muted></video>
     <canvas id="output_canvas"></canvas>
-    
     <div id="guide-outer" class="guide-circle"></div>
     <div id="guide-inner" class="guide-circle"></div>
     <div id="face-mask-area"></div>
-
     <div id="level-dot"></div>
-
     <div id="debug-panel">
-      <div id="status_text">顔を枠に合わせてください</div>
+      <div id="status_text">3Dスキャン準備中...</div>
     </div>
   </div>
-
   <div id="ui-bottom">
     <button id="start_btn" class="btn" disabled>距離を調整中...</button>
   </div>
@@ -97,7 +87,7 @@
           modelAssetPath: `https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task`,
           delegate: "GPU" 
         },
-        runningMode: "VIDEO", numFaces: 1, refineLandmarks: true
+        runningMode: "VIDEO", numFaces: 1, refineLandmarks: true // refineLandmarksが3D精度に重要
       });
       startCamera();
     }
@@ -109,7 +99,14 @@
       });
     }
 
-    const calcDist = (p1, p2, w, h) => Math.sqrt(Math.pow((p1.x - p2.x)*w, 2) + Math.pow((p1.y - p2.y)*h, 2));
+    // 3D空間上の2点間の距離を計算する関数 (Metric calculation)
+    const calcDist3D = (p1, p2) => {
+        return Math.sqrt(
+            Math.pow(p1.x - p2.x, 2) + 
+            Math.pow(p1.y - p2.y, 2) + 
+            Math.pow(p1.z - p2.z, 2)
+        );
+    };
 
     async function predict() {
       if (video.videoWidth > 0) {
@@ -123,7 +120,7 @@
           const w = canvasElement.width;
           const h = canvasElement.height;
 
-          // 姿勢制御
+          // 姿勢制御UIの更新
           const xRot = (pts[468].z - pts[473].z) * 1000;
           const yRot = (pts[4].y - (pts[133].y + pts[362].y)/2) * 400;
           levelDot.style.left = `calc(50% + ${xRot}px)`;
@@ -132,41 +129,42 @@
           const zDiff = Math.abs(pts[468].z - pts[473].z); 
           const isFrontal = zDiff < 0.015;
           
-          // 距離判定（0.26〜0.44: 二重枠の間に相当）
-          const faceRatio = (calcDist(pts[234], pts[454], w, h) / w);
+          // 2Dの見た目比率（UIのガイド用）
+          const faceRatio = (Math.sqrt(Math.pow((pts[234].x - pts[454].x)*w, 2) + Math.pow((pts[234].y - pts[454].y)*h, 2)) / w);
           const isDistOk = faceRatio >= 0.26 && faceRatio <= 0.44;
 
           if (isFrontal && isDistOk) {
             faceMaskArea.classList.add("ok");
             levelDot.classList.add("ok");
-            statusText.innerText = "OK！そのままキープ";
+            statusText.innerText = "3Dスキャン可能";
             statusText.style.color = "#4cd964";
             startBtn.disabled = false;
             startBtn.classList.add("active");
-            startBtn.innerText = "計測開始";
+            startBtn.innerText = "3D計測開始";
           } else {
             faceMaskArea.classList.remove("ok");
             levelDot.classList.remove("ok");
             startBtn.disabled = true;
             startBtn.classList.remove("active");
-            
-            if (!isFrontal) {
-                statusText.innerText = "正面を向いて（点を中心に）";
-                statusText.style.color = "#ff3b30";
-                startBtn.innerText = "正面を向いてください";
-            } else {
-                statusText.innerText = faceRatio < 0.26 ? "もう少し近づいて" : "少し離れて（二重枠の間へ）";
-                statusText.style.color = "#ffcc00";
-                startBtn.innerText = "距離を調整してください";
-            }
+            startBtn.innerText = "位置を調整中...";
+            statusText.innerText = !isFrontal ? "正面を向いてください" : "枠に顔を合わせてください";
+            statusText.style.color = "#ffcc00";
           }
 
           if (isDataCollecting && isFrontal && isDistOk) {
-            const pdPx = calcDist(pts[473], pts[468], w, h);
-            const mmPerPx = MY_PD_MM / pdPx;
+            // 【重要】3D座標空間での距離計算
+            // MediaPipeのx,y,z座標(0.0〜1.0)を使って、PD比で実寸化する
+            const pd3D = calcDist3D(pts[468], pts[473]);
+            const mmPerUnit3D = MY_PD_MM / pd3D;
+
+            const ieMm = calcDist3D(pts[133], pts[362]) * mmPerPx; // 本来は3D空間上の点
+            // 今回はより安定させるため、3D座標の差分から実寸を算出
+            const ieDist3D = calcDist3D(pts[133], pts[362]) * mmPerUnit3D;
+            const fwDist3D = calcDist3D(pts[234], pts[454]) * mmPerUnit3D;
+
             measurementData.push({ 
-                ie: calcDist(pts[133], pts[362], w, h) * mmPerPx, 
-                fw: calcDist(pts[234], pts[454], w, h) * mmPerPx, 
+                ie: ieDist3D, 
+                fw: fwDist3D, 
                 score: zDiff 
             });
             startBtn.innerText = `解析中...(${Math.round(measurementData.length/60*100)}%)`;
@@ -184,7 +182,7 @@
       measurementData.sort((a, b) => a.score - b.score);
       const bestSamples = measurementData.slice(0, 20);
       const avg = (key) => (bestSamples.reduce((a, b) => a + b[key], 0) / bestSamples.length).toFixed(1);
-      alert(`【計測完了】\n目頭間: ${avg('ie')}mm\n顔幅: ${avg('fw')}mm`);
+      alert(`【3D計測完了】\n目頭間: ${avg('ie')}mm\n顔幅: ${avg('fw')}mm`);
     }
     setup();
   </script>
