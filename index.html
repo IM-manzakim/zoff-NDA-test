@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-  <title>Zoff DNA - 中央計測モード</title>
+  <title>Zoff DNA - 高精度統計モード</title>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3"></script>
   <style>
     html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; position: fixed; }
@@ -11,7 +11,6 @@
     #container { position: relative; flex: 1; width: 100%; overflow: hidden; }
     video, canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
     
-    /* ガイド枠をあえて小さく設定（レンズ中央部へ誘導） */
     #face-guide {
       position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
       width: 220px; height: 300px; border: 3px dashed rgba(255, 255, 255, 0.5);
@@ -44,14 +43,14 @@
     <canvas id="output_canvas"></canvas>
     <div id="face-guide"></div>
     <div id="debug-panel">
-      <div style="text-align:center; font-weight:bold; color:#aaa; margin-bottom:5px; font-size:11px;">【中央部計測：歪み補正モード】</div>
+      <div style="text-align:center; font-weight:bold; color:#aaa; margin-bottom:5px; font-size:11px;">【高精度統計：正面限定計測】</div>
       <div class="value-row"><span>瞳孔間距離(PD)基準:</span><span class="val">66.0 mm</span></div>
-      <div class="value-row"><span>目頭間距離(IE):</span><span id="val_ie" class="val" style="color:#ff3b30;">- mm</span></div>
-      <div class="value-row"><span>顔幅(FW):</span><span id="val_fw" class="val">- mm</span></div>
+      <div class="value-row"><span>目頭間(IE) リアルタイム:</span><span id="val_ie" class="val" style="color:#ff3b30;">- mm</span></div>
+      <div class="value-row"><span>顔幅(FW) リアルタイム:</span><span id="val_fw" class="val">- mm</span></div>
       <div class="value-row"><span>判定:</span><span id="status_text" style="font-weight:bold;">判定中...</span></div>
     </div>
   </div>
-  <div id="ui-bottom"><button id="start_btn" class="btn">平均計測開始</button></div>
+  <div id="ui-bottom"><button id="start_btn" class="btn">統計計測開始</button></div>
 
   <script type="module">
     import { FaceLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3";
@@ -100,32 +99,29 @@
           const w = canvasElement.width;
           const h = canvasElement.height;
 
-          // 姿勢判定（より厳格に）
+          // 姿勢判定（0.012以下のみOKとする超厳格設定）
           const zDiff = Math.abs(pts[468].z - pts[473].z); 
-          const isFrontal = zDiff < 0.015;
+          const isFrontal = zDiff < 0.012;
           
-          // 距離判定（顔を小さく映させる設定：0.25〜0.40に制限）
           const faceRatio = (calcDist(pts[234], pts[454], w, h) / w);
-          const isDistTooFar = faceRatio < 0.25;
-          const isDistTooNear = faceRatio > 0.40; // 0.60から大幅に下げ、中央に固定
+          const isDistOk = faceRatio >= 0.25 && faceRatio <= 0.40;
 
           const statusEl = document.getElementById("status_text");
-          if (!isFrontal) { statusEl.innerText = "正面を向いて"; statusEl.style.color = "#ff3b30"; faceGuide.className = "ng"; }
-          else if (isDistTooFar) { statusEl.innerText = "もう少し近づけて"; statusEl.style.color = "#ff3b30"; faceGuide.className = "ng"; }
-          else if (isDistTooNear) { statusEl.innerText = "少し離して(枠内に)"; statusEl.style.color = "#ff3b30"; faceGuide.className = "ng"; }
-          else { statusEl.innerText = "OK"; statusEl.style.color = "#4cd964"; faceGuide.className = "ok"; }
+          if (!isFrontal) { statusEl.innerText = "もっと正面を向いて"; statusEl.style.color = "#ff3b30"; faceGuide.className = "ng"; }
+          else if (!isDistOk) { statusEl.innerText = "距離を枠に合わせて"; statusEl.style.color = "#ff3b30"; faceGuide.className = "ng"; }
+          else { statusEl.innerText = "OK：動かないで"; statusEl.style.color = "#4cd964"; faceGuide.className = "ok"; }
 
           const pdPx = calcDist(pts[473], pts[468], w, h);
           const mmPerPx = MY_PD_MM / pdPx;
-
           const ieMm = calcDist(pts[133], pts[362], w, h) * mmPerPx;
           const fwMm = calcDist(pts[234], pts[454], w, h) * mmPerPx;
 
           document.getElementById("val_ie").innerText = ieMm.toFixed(1) + " mm";
           document.getElementById("val_fw").innerText = fwMm.toFixed(1) + " mm";
 
-          if (isDataCollecting && isFrontal && !isDistTooFar && !isDistTooNear) {
-            measurementData.push({ ie: ieMm, fw: fwMm });
+          // 計測中かつ「正面OK」の時だけデータを蓄積
+          if (isDataCollecting && isFrontal && isDistOk) {
+            measurementData.push({ ie: ieMm, fw: fwMm, score: zDiff }); // zDiffをスコアとして保存
             startBtn.innerText = `解析中...(${Math.round(measurementData.length/60*100)}%)`;
             if (measurementData.length >= 60) finish();
           }
@@ -135,10 +131,18 @@
     }
 
     startBtn.onclick = () => { measurementData = []; isDataCollecting = true; startBtn.disabled = true; };
+
     function finish() {
       isDataCollecting = false; startBtn.disabled = false; startBtn.innerText = "再計測";
-      const avg = (key) => (measurementData.reduce((a, b) => a + b[key], 0) / measurementData.length).toFixed(1);
-      alert(`【中央計測完了】\n目頭間: ${avg('ie')}mm\n顔幅: ${avg('fw')}mm`);
+      
+      // 統計処理：zDiff（スコア）が小さい＝より正面を向いている順にソート
+      measurementData.sort((a, b) => a.score - b.score);
+      
+      // 上位20サンプル（約30%）だけを抽出して平均を出す
+      const bestSamples = measurementData.slice(0, 20);
+      const avg = (key) => (bestSamples.reduce((a, b) => a + b[key], 0) / bestSamples.length).toFixed(1);
+      
+      alert(`【統計計測完了】\n（最も正面に近い20フレームを抽出）\n\n目頭間: ${avg('ie')}mm\n顔幅: ${avg('fw')}mm`);
     }
     setup();
   </script>
