@@ -6,21 +6,27 @@
   <title>Zoff DNA - 検証モード</title>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3"></script>
   <style>
-    /* スクロールを完全に禁止し、iPhoneのセーフエリアに対応 */
-    body { 
-      margin: 0; 
-      background: #000; 
-      color: #fff; 
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; 
-      overflow: hidden; 
-      position: fixed; /* スクロール防止の決定打 */
-      width: 100%;
-      height: 100%;
+    /* 画面全体の設定：スクロールを徹底排除 */
+    html, body { 
+      margin: 0; padding: 0; width: 100%; height: 100%; 
+      overflow: hidden; background: #000; position: fixed;
     }
-    #container { position: relative; width: 100vw; height: 100vh; }
-    video, canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+    /* 画面を「カメラエリア」と「ボタンエリア」に分割 */
+    body { 
+      display: flex; flex-direction: column; 
+      font-family: -apple-system, sans-serif;
+    }
+
+    /* カメラ表示エリア */
+    #container { 
+      position: relative; flex: 1; /* 余ったスペースをすべて使う */
+      width: 100%; overflow: hidden; 
+    }
+    video, canvas { 
+      position: absolute; top: 0; left: 0; width: 100%; height: 100%; 
+      object-fit: cover; transform: scaleX(-1); 
+    }
     
-    /* ガイド枠 */
     #face-guide {
       position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
       width: 280px; height: 380px; border: 3px dashed rgba(255, 255, 255, 0.5);
@@ -29,36 +35,29 @@
     #face-guide.ok { border-color: #0070BB; background: rgba(0, 112, 187, 0.1); border-style: solid; }
     #face-guide.ng { border-color: #E60012; background: rgba(230, 0, 18, 0.1); border-style: solid; }
 
-    /* 数値表示用オーバーレイ：上部のノッチを考慮 */
     #debug-panel {
-      position: absolute; 
-      top: calc(20px + env(safe-area-inset-top)); 
-      left: 10px; 
-      right: 10px;
-      background: rgba(0, 0, 0, 0.7); padding: 15px; border-radius: 10px;
-      font-size: 14px; z-index: 20; border: 1px solid #444;
+      position: absolute; top: calc(10px + env(safe-area-inset-top)); 
+      left: 10px; right: 10px;
+      background: rgba(0, 0, 0, 0.7); padding: 12px; border-radius: 10px;
+      font-size: 13px; z-index: 20; border: 1px solid #444;
     }
-    .value-row { display: flex; justify-content: space-between; margin-bottom: 5px; }
-    .val { color: #0070BB; font-weight: bold; font-size: 18px; }
-    .val.highlight { color: #ff3b30; font-size: 22px; }
+    .value-row { display: flex; justify-content: space-between; margin-bottom: 3px; }
+    .val { color: #0070BB; font-weight: bold; font-size: 16px; }
 
-    /* 下部ボタン：iPhoneのホームバーに被らないように自動調整 */
+    /* 下部ボタンエリア：ここを確実に表示させる */
     #ui-bottom { 
-      position: absolute; 
-      bottom: calc(30px + env(safe-area-inset-bottom)); 
-      width: 100%; 
+      background: #111; 
+      padding-top: 15px;
+      padding-bottom: calc(20px + env(safe-area-inset-bottom)); /* iPhoneのバーを避ける */
       text-align: center; 
-      z-index: 20; 
+      z-index: 30;
+      border-top: 1px solid #333;
     }
     .btn { 
-      background: #0070BB; 
-      color: #fff; 
-      border: none; 
-      padding: 15px 50px; 
-      border-radius: 30px; 
-      font-size: 18px; 
-      font-weight: bold;
-      -webkit-appearance: none; /* iOS独自のボタン装飾をリセット */
+      background: #0070BB; color: #fff; border: none; 
+      padding: 15px 60px; border-radius: 30px; 
+      font-size: 18px; font-weight: bold;
+      -webkit-appearance: none;
     }
     .btn:disabled { background: #555; }
   </style>
@@ -70,18 +69,16 @@
     <div id="face-guide"></div>
 
     <div id="debug-panel">
-      <div style="text-align:center; font-weight:bold; color:#aaa; margin-bottom:10px; font-size:12px;">【検証用リアルタイム計測値】</div>
-      <div class="value-row"><span>瞳孔間距離(PD)基準:</span><span class="val">66.0 mm</span></div>
-      <div class="value-row"><span>目頭間距離(IE):</span><span id="val_ie" class="val highlight">- mm</span></div>
+      <div style="text-align:center; font-weight:bold; color:#aaa; margin-bottom:5px; font-size:11px;">【検証用リアルタイム計測値】</div>
+      <div class="value-row"><span>PD基準:</span><span class="val">66.0 mm</span></div>
+      <div class="value-row"><span>目頭(IE):</span><span id="val_ie" class="val" style="color:#ff3b30;">- mm</span></div>
       <div class="value-row"><span>顔幅(FW):</span><span id="val_fw" class="val">- mm</span></div>
-      <div class="value-row"><span>鼻幅(NW):</span><span id="val_nw" class="val">- mm</span></div>
-      <hr style="border:0; border-top:1px solid #444; margin:10px 0;">
-      <div class="value-row"><span>姿勢/距離ステータス:</span><span id="status_text" style="font-weight:bold;">判定中...</span></div>
+      <div class="value-row"><span>ステータス:</span><span id="status_text" style="font-weight:bold;">判定中...</span></div>
     </div>
+  </div>
 
-    <div id="ui-bottom">
-      <button id="start_btn" class="btn">平均計測開始 (2秒)</button>
-    </div>
+  <div id="ui-bottom">
+    <button id="start_btn" class="btn">平均計測開始</button>
   </div>
 
   <script type="module">
@@ -120,43 +117,41 @@
     const calcDist = (p1, p2, w, h) => Math.sqrt(Math.pow((p1.x - p2.x)*w, 2) + Math.pow((p1.y - p2.y)*h, 2));
 
     async function predict() {
-      canvasElement.width = video.videoWidth;
-      canvasElement.height = video.videoHeight;
-      const results = faceLandmarker.detectForVideo(video, performance.now());
-      
-      canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-      if (results.faceLandmarks && results.faceLandmarks.length > 0) {
-        const pts = results.faceLandmarks[0];
-        const w = canvasElement.width;
-        const h = canvasElement.height;
+      if (video.videoWidth > 0) {
+        canvasElement.width = video.videoWidth;
+        canvasElement.height = video.videoHeight;
+        const results = faceLandmarker.detectForVideo(video, performance.now());
+        
+        canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+        if (results.faceLandmarks && results.faceLandmarks.length > 0) {
+          const pts = results.faceLandmarks[0];
+          const w = canvasElement.width;
+          const h = canvasElement.height;
 
-        // ガードレール判定
-        const zDiff = Math.abs(pts[468].z - pts[473].z); 
-        const isFrontal = zDiff < 0.018;
-        const faceRatio = (calcDist(pts[234], pts[454], w, h) / w);
-        const isDistOk = faceRatio > 0.3 && faceRatio < 0.6;
+          const zDiff = Math.abs(pts[468].z - pts[473].z); 
+          const isFrontal = zDiff < 0.018;
+          const faceRatio = (calcDist(pts[234], pts[454], w, h) / w);
+          const isDistOk = faceRatio > 0.3 && faceRatio < 0.6;
 
-        const statusEl = document.getElementById("status_text");
-        if (!isFrontal) { statusEl.innerText = "正面を向いて"; statusEl.style.color = "#ff3b30"; faceGuide.className = "ng"; }
-        else if (!isDistOk) { statusEl.innerText = "距離を調整"; statusEl.style.color = "#ff3b30"; faceGuide.className = "ng"; }
-        else { statusEl.innerText = "OK: 計測可能"; statusEl.style.color = "#4cd964"; faceGuide.className = "ok"; }
+          const statusEl = document.getElementById("status_text");
+          if (!isFrontal) { statusEl.innerText = "正面を向いて"; statusEl.style.color = "#ff3b30"; faceGuide.className = "ng"; }
+          else if (!isDistOk) { statusEl.innerText = "距離を調整"; statusEl.style.color = "#ff3b30"; faceGuide.className = "ng"; }
+          else { statusEl.innerText = "OK"; statusEl.style.color = "#4cd964"; faceGuide.className = "ok"; }
 
-        // リアルタイム計算
-        const pdPx = calcDist(pts[473], pts[468], w, h);
-        const mmPerPx = MY_PD_MM / pdPx;
+          const pdPx = calcDist(pts[473], pts[468], w, h);
+          const mmPerPx = MY_PD_MM / pdPx;
 
-        const ieMm = calcDist(pts[133], pts[362], w, h) * mmPerPx;
-        const fwMm = calcDist(pts[234], pts[454], w, h) * mmPerPx;
-        const nwMm = calcDist(pts[64], pts[294], w, h) * mmPerPx;
+          const ieMm = calcDist(pts[133], pts[362], w, h) * mmPerPx;
+          const fwMm = calcDist(pts[234], pts[454], w, h) * mmPerPx;
 
-        document.getElementById("val_ie").innerText = ieMm.toFixed(1) + " mm";
-        document.getElementById("val_fw").innerText = fwMm.toFixed(1) + " mm";
-        document.getElementById("val_nw").innerText = nwMm.toFixed(1) + " mm";
+          document.getElementById("val_ie").innerText = ieMm.toFixed(1) + " mm";
+          document.getElementById("val_fw").innerText = fwMm.toFixed(1) + " mm";
 
-        if (isDataCollecting && isFrontal && isDistOk) {
-          measurementData.push({ ie: ieMm, fw: fwMm, nw: nwMm });
-          startBtn.innerText = `解析中...(${Math.round(measurementData.length/60*100)}%)`;
-          if (measurementData.length >= 60) finish();
+          if (isDataCollecting && isFrontal && isDistOk) {
+            measurementData.push({ ie: ieMm, fw: fwMm });
+            startBtn.innerText = `解析中...(${Math.round(measurementData.length/60*100)}%)`;
+            if (measurementData.length >= 60) finish();
+          }
         }
       }
       requestAnimationFrame(predict);
@@ -173,7 +168,7 @@
       startBtn.disabled = false;
       startBtn.innerText = "再計測";
       const avg = (key) => (measurementData.reduce((a, b) => a + b[key], 0) / measurementData.length).toFixed(1);
-      alert(`【計測完了】\n目頭間: ${avg('ie')}mm\n顔幅: ${avg('fw')}mm\n鼻幅: ${avg('nw')}mm`);
+      alert(`【計測完了】\n目頭間: ${avg('ie')}mm\n顔幅: ${avg('fw')}mm`);
     }
 
     setup();
