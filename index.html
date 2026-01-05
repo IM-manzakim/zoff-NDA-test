@@ -69,6 +69,98 @@
 
   <script type="module">
     // ... (MediaPipeのロジックは前回と同じものを流用) ...
+    import { FaceLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3";
+
+    const video = document.getElementById("webcam");
+    const canvasElement = document.getElementById("output_canvas");
+    const canvasCtx = canvasElement.getContext("2d");
+    const faceGuide = document.getElementById("face-guide");
+    const startBtn = document.getElementById("start_btn");
+    
+    let faceLandmarker;
+    let isDataCollecting = false;
+    let measurementData = [];
+    const MY_PD_MM = 66.0; 
+
+    async function setup() {
+      const filesetResolver = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm");
+      faceLandmarker = await FaceLandmarker.createFromOptions(filesetResolver, {
+        baseOptions: { 
+          modelAssetPath: `https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task`,
+          delegate: "GPU" 
+        },
+        runningMode: "VIDEO", numFaces: 1, refineLandmarks: true
+      });
+      startCamera();
+    }
+
+    function startCamera() {
+      navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: 1280, height: 720 } }).then((stream) => {
+        video.srcObject = stream;
+        video.onloadeddata = predict;
+      });
+    }
+
+    const calcDist = (p1, p2, w, h) => Math.sqrt(Math.pow((p1.x - p2.x)*w, 2) + Math.pow((p1.y - p2.y)*h, 2));
+
+    async function predict() {
+      canvasElement.width = video.videoWidth;
+      canvasElement.height = video.videoHeight;
+      const results = faceLandmarker.detectForVideo(video, performance.now());
+      
+      canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+      if (results.faceLandmarks && results.faceLandmarks.length > 0) {
+        const pts = results.faceLandmarks[0];
+        const w = canvasElement.width;
+        const h = canvasElement.height;
+
+        // ガードレール判定
+        const zDiff = Math.abs(pts[468].z - pts[473].z); 
+        const isFrontal = zDiff < 0.018;
+        const faceRatio = (calcDist(pts[234], pts[454], w, h) / w);
+        const isDistOk = faceRatio > 0.3 && faceRatio < 0.6; // iPhone向けに少し緩和
+
+        const statusEl = document.getElementById("status_text");
+        if (!isFrontal) { statusEl.innerText = "正面を向いて"; statusEl.style.color = "#ff3b30"; faceGuide.className = "ng"; }
+        else if (!isDistOk) { statusEl.innerText = "距離を調整"; statusEl.style.color = "#ff3b30"; faceGuide.className = "ng"; }
+        else { statusEl.innerText = "OK: 計測可能"; statusEl.style.color = "#4cd964"; faceGuide.className = "ok"; }
+
+        // リアルタイム計算
+        const pdPx = calcDist(pts[473], pts[468], w, h);
+        const mmPerPx = MY_PD_MM / pdPx;
+
+        const ieMm = calcDist(pts[133], pts[362], w, h) * mmPerPx;
+        const fwMm = calcDist(pts[234], pts[454], w, h) * mmPerPx;
+        const nwMm = calcDist(pts[64], pts[294], w, h) * mmPerPx;
+
+        document.getElementById("val_ie").innerText = ieMm.toFixed(1) + " mm";
+        document.getElementById("val_fw").innerText = fwMm.toFixed(1) + " mm";
+        document.getElementById("val_nw").innerText = nwMm.toFixed(1) + " mm";
+
+        if (isDataCollecting && isFrontal && isDistOk) {
+          measurementData.push({ ie: ieMm, fw: fwMm, nw: nwMm });
+          startBtn.innerText = `解析中...(${Math.round(measurementData.length/60*100)}%)`;
+          if (measurementData.length >= 60) finish();
+        }
+      }
+      requestAnimationFrame(predict);
+    }
+
+    startBtn.onclick = () => {
+      measurementData = [];
+      isDataCollecting = true;
+      startBtn.disabled = true;
+    };
+
+    function finish() {
+      isDataCollecting = false;
+      startBtn.disabled = false;
+      startBtn.innerText = "再計測";
+      const avg = (key) => (measurementData.reduce((a, b) => a + b[key], 0) / measurementData.length).toFixed(1);
+      alert(`【計測完了】\n目頭間: ${avg('ie')}mm\n顔幅: ${avg('fw')}mm\n鼻幅: ${avg('nw')}mm`);
+    }
+
+    setup();
     // ... (GitHubにアップする際は前回の script 内容をここに貼り付けてください) ...
   </script>
 </body>
